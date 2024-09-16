@@ -263,7 +263,7 @@ def draw_tv():
     # Blenders Coords to OpenGL
     # Blender -> X Y Z -> translated to OpenGL is Y Z X
     # Monitor Bevel
-    glColor3f(0.0, 0.0, 0.0)
+    glColor3f(0.1, 0.1, 0.1)
     glVertex3f(-0.938077, 0.587625, 0.428424)
     glVertex3f(0.940166, 0.587625, 0.428424)
     glVertex3f(0.993712, 0.665196, 0.493743)
@@ -382,7 +382,7 @@ def main():
     # Higher alpha means less smoothing
     # We have different classes for each attribute because it saves the prior value to adjust the new one
     # so we need to save them seperately or it wont work
-    alpha = 0.3
+    alpha = 0.2
     smoothingRoll = ExponentialMovingAverageRoll(alpha = alpha)
     smoothingPitch = ExponentialMovingAveragePitch(alpha = alpha)
     smoothingYaw = ExponentialMovingAverageYaw(alpha = alpha)
@@ -547,15 +547,18 @@ def main():
         texture_id = load_texture()
         texture_id = update_texture()
 
-        if steady_pose.any():
+        try:
+            if steady_pose.any():
 
-            smoothed_roll = smoothingRoll.update(roll)
-            smoothed_pitch = smoothingPitch.update(pitch)
-            smoothed_yaw = smoothingYaw.update(yaw)
-            smoothed_x = smoothingX.update(steady_pose[1][0])
-            smoothed_y = smoothingY.update(steady_pose[1][1])
-            smoothed_z = smoothingZ.update(steady_pose[1][2])
-            apply_object_rotation_translation(smoothed_roll, smoothed_pitch, smoothed_yaw, smoothed_x, smoothed_y, smoothed_z, texture_id)
+                smoothed_roll = smoothingRoll.update(roll)
+                smoothed_pitch = smoothingPitch.update(pitch)
+                smoothed_yaw = smoothingYaw.update(yaw)
+                smoothed_x = smoothingX.update(steady_pose[1][0])
+                smoothed_y = smoothingY.update(steady_pose[1][1])
+                smoothed_z = smoothingZ.update(steady_pose[1][2])
+                apply_object_rotation_translation(smoothed_roll, smoothed_pitch, smoothed_yaw, smoothed_x, smoothed_y, smoothed_z, texture_id)
+        except:
+            none = 0
 
         # Swap the display buffer
         pygame.display.flip()
