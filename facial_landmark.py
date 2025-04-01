@@ -11,7 +11,7 @@ class FaceMeshDetector:
                  static_image_mode=False,
                  max_num_faces=1,
                  min_detection_confidence=0.5,
-                 min_tracking_confidence=0.5):
+                 min_tracking_confidence=0.9):
 
         self.static_image_mode = static_image_mode
         self.max_num_faces = max_num_faces

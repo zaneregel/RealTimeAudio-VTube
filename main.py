@@ -7,7 +7,10 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import pygame
-from PIL import Image
+import requests
+import json
+from PIL import Image, ImageDraw
+import pyassimp
 from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLUT import *
@@ -24,6 +27,8 @@ from stabilizer import Stabilizer
 from facial_features import FacialFeatures, Eyes
 
 import sys
+
+count = 0
 
 def run_once(f):
     def wrapper(*args, **kwargs):
@@ -109,54 +114,7 @@ class ExponentialMovingAverageZ:
             self.smoothed_value = self.alpha * new_value + (1 - self.alpha) * self.smoothed_value
         return self.smoothed_value
 
-def draw_cube():
-    glBegin(GL_QUADS)
-
-    # Front face (Red)
-    glColor3f(1.0, 0.0, 0.0)  # Red
-    glVertex3f(-1.0, -1.0,  1.0)
-    glVertex3f( 1.0, -1.0,  1.0)
-    glVertex3f( 1.0,  1.0,  1.0)
-    glVertex3f(-1.0,  1.0,  1.0)
-
-    # Back face (Green)
-    glColor3f(0.0, 1.0, 0.0)  # Green
-    glVertex3f(-1.0, -1.0, -1.0)
-    glVertex3f(-1.0,  1.0, -1.0)
-    glVertex3f( 1.0,  1.0, -1.0)
-    glVertex3f( 1.0, -1.0, -1.0)
-
-    # Top face (Blue)
-    glColor3f(0.0, 0.0, 1.0)  # Blue
-    glVertex3f(-1.0,  1.0, -1.0)
-    glVertex3f(-1.0,  1.0,  1.0)
-    glVertex3f( 1.0,  1.0,  1.0)
-    glVertex3f( 1.0,  1.0, -1.0)
-
-    # Bottom face (Yellow)
-    glColor3f(1.0, 1.0, 0.0)  # Yellow
-    glVertex3f(-1.0, -1.0, -1.0)
-    glVertex3f( 1.0, -1.0, -1.0)
-    glVertex3f( 1.0, -1.0,  1.0)
-    glVertex3f(-1.0, -1.0,  1.0)
-
-    # Right face (Magenta)
-    glColor3f(1.0, 0.0, 1.0)  # Magenta
-    glVertex3f( 1.0, -1.0, -1.0)
-    glVertex3f( 1.0,  1.0, -1.0)
-    glVertex3f( 1.0,  1.0,  1.0)
-    glVertex3f( 1.0, -1.0,  1.0)
-
-    # Left face (Cyan)
-    glColor3f(0.0, 1.0, 1.0)  # Cyan
-    glVertex3f(-1.0, -1.0, -1.0)
-    glVertex3f(-1.0, -1.0,  1.0)
-    glVertex3f(-1.0,  1.0,  1.0)
-    glVertex3f(-1.0,  1.0, -1.0)
-
-    glEnd()
-
-def apply_object_rotation_translation(roll, pitch, yaw, x, y, z, texture_id):
+def apply_object_rotation_translation(roll, pitch, yaw, x, y, z):
     # Reset the transformations to identity before applying new ones
     glLoadIdentity()
 
@@ -170,24 +128,17 @@ def apply_object_rotation_translation(roll, pitch, yaw, x, y, z, texture_id):
     glRotatef((roll*0.7), 0, 0, 1)  # Rotate around z-axis (yaw)
 
     # Draw the cube with the new rotation
-    #draw_cube()
-    draw_tv()
-    draw_tvface_with_texture()
+    draw_fbx()
 
 @run_once
 def load_texture():
     # Load new image
-    try:
-        image_path = "G:\Videos\VTubing\Python-Realtime-Audio\plot_img.png"
-        img = Image.open(image_path)
-        img = img.transpose(Image.FLIP_TOP_BOTTOM)
-        img_data = img.convert("RGBA").tobytes()
-    except:
+    image = get_graph_image()
+    if(image == None):
         return
 
     # Generate texture ID
-    texture_id = glGenTextures(1)
-    glBindTexture(GL_TEXTURE_2D, texture_id)
+    glBindTexture(GL_TEXTURE_2D, 1)
     
     # Set texture parameters
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
@@ -196,166 +147,116 @@ def load_texture():
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
     
     # Load texture data
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 800, 600, 0, GL_RGB, GL_UNSIGNED_BYTE, image)
     
     print("img loaded")
 
-    return texture_id
+    return
+
+def get_graph_image():
+        url = "http://127.0.0.1:5000/data"
+        try:
+            response = requests.get(url)
+        except:
+            print("Error connecting to server")
+            return None
+
+        if response.status_code == 200:
+            graph_data = json.loads(response.text)
+        else:
+            print("HTTP Error:", response.status_code)
+            response.close()
+            return None
+        
+        response.close()
+
+        width = 800
+        height = 600
+
+       # Scale y-values to pixel coordinates (flip y-axis to match image space)
+        y_scaled = [(1 - y) * (height - 1) for y in graph_data]
+
+        # Scale x-values from [0,1023] to [0,799] for 800px width
+        x_scaled = np.linspace(0, width - 1, 1024).astype(int)
+
+        # Create blank image (black background)
+        img_array = np.zeros((height, width, 3), dtype=np.uint8)
+
+        # Convert to (x, y) pixel coordinates
+        points_px = [(x_scaled[i], int(y_scaled[i])) for i in range(1024)]
+
+        # Draw the graph
+        img = Image.fromarray(img_array, "RGB")
+        draw = ImageDraw.Draw(img)
+        draw.line(points_px, fill="yellow", width=3)  # Draw line in yellow
+
+        return img.tobytes()
 
 def update_texture():
     # Load new image
-    try:
-        image_path = "G:\Videos\VTubing\Python-Realtime-Audio\plot_img.png"
-        img = Image.open(image_path)
-        img = img.transpose(Image.FLIP_TOP_BOTTOM)
-        img_data = img.convert("RGBA").tobytes()
-    except:
+    image = get_graph_image()
+    if(image == None):
         return
     
-    # Generate texture ID
-    texture_id = glGenTextures(1)
-    glBindTexture(GL_TEXTURE_2D, texture_id)
-    
-    # Set texture parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-    
-    # Load texture data
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
-    
+    glBindTexture(GL_TEXTURE_2D, 1)
+    # Update texture image
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 800, 600, 0, GL_RGB, GL_UNSIGNED_BYTE, image)
+
     #print("updated")
 
-    return texture_id
+    return
 
 
+def draw_fbx():
+    with pyassimp.load('TVHead.fbx') as scene:
 
+        # Access First mesh in fbx
+        meshes = []
+        swap_material = 'Flat Black'
+        for mesh in scene.meshes:
+            vertices = np.array(mesh.vertices, dtype=np.float32).flatten()
+            faces = np.array(mesh.faces, dtype=np.uint32).flatten()
 
-def draw_tvface_with_texture():
-    glEnable(GL_TEXTURE_2D)
-    glBegin(GL_QUADS)
+            # Extract material for the mesh
+            material = scene.materials[mesh.materialindex]
 
-    #glBindTexture(GL_TEXTURE_2D, texture_id)
-    # Draw Just Monitor
-    glColor3f(1.0, 1.0, 0.0)
-    glTexCoord2f(0, 0)
-    glVertex3f(-0.938077, -0.6964, 0.428424)
+            # Extract material name
+            name = material.properties['name']
+
+            # Extracting color from material (diffuse color)
+            if ('diffuse', 0) in material.properties:
+                if material.properties['name'] == swap_material:
+                    diffuse_color = (1.0, 1.0, 0)
+                else:
+                    diffuse_color = material.properties['diffuse']
+            else:
+                diffuse_color = (1.0, 0, 0)  # Default to red if no color found
+
+            meshes.append((vertices, faces, diffuse_color, name))
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     
-    glTexCoord2f(1, 0)
-    glVertex3f(0.940166, -0.6964, 0.428424)
-    
-    glTexCoord2f(1, 1)
-    glVertex3f(0.940166, 0.587625, 0.428424)
-    
-    glTexCoord2f(0, 1)
-    glVertex3f(-0.938077, 0.587625, 0.428424)
+        for vertices, faces , diffuse_color, name in meshes:
+            # Apply material color (diffuse)
+            if name == swap_material:
+                glEnable(GL_TEXTURE_2D)
+                glBindTexture(GL_TEXTURE_2D, 1)
+                glEnableClientState(GL_TEXTURE_COORD_ARRAY)
+                glTexCoordPointer(2, GL_FLOAT, 0, [[0, 0], [1,0],[1,1],[0,1]])
+                glColor3f(0.6,0.6,0.6)
+            else:
+                glColor3f(*diffuse_color)
 
+            glEnableClientState(GL_VERTEX_ARRAY)
+            glVertexPointer(3, GL_FLOAT, 0, vertices)
 
-    glEnd()
-    glDisable(GL_TEXTURE_2D)
+            glDrawElements(GL_TRIANGLES, len(faces), GL_UNSIGNED_INT, faces)
+            
+            glDisableClientState(GL_VERTEX_ARRAY)
 
-def draw_tv():
-    glBegin(GL_QUADS)
-
-    #Draw TV Body except monitor
-    # Faces done in counter clock wise manner from top face
-    # Blenders Coords to OpenGL
-    # Blender -> X Y Z -> translated to OpenGL is Y Z X
-    # Monitor Bevel
-    glColor3f(0.1, 0.1, 0.1)
-    glVertex3f(-0.938077, 0.587625, 0.428424)
-    glVertex3f(0.940166, 0.587625, 0.428424)
-    glVertex3f(0.993712, 0.665196, 0.493743)
-    glVertex3f(-0.991623, 0.665196, 0.493743)
-
-    glVertex3f(-0.991623, -0.773975, 0.493743)
-    glVertex3f(-0.938077, -0.6964, 0.428424)
-    glVertex3f(-0.938077, 0.587625, 0.428424)
-    glVertex3f(-0.991623, 0.665196, 0.493743)
-
-    glVertex3f(-0.991623, -0.773975, 0.493743)
-    glVertex3f(0.993712, -0.773975, 0.493743)
-    glVertex3f(0.940166, -0.696405, 0.428424)
-    glVertex3f(-0.938077, -0.6964, 0.428424)
-
-    glVertex3f(0.940166, -0.696405, 0.428424)
-    glVertex3f(0.993712, -0.773975, 0.493743)
-    glVertex3f(0.993712, 0.665196, 0.493743)
-    glVertex3f(0.940166, 0.587625, 0.428424)
-
-    #Monitor Front Edge
-    glColor3f(0.2, 0.2, 0.2)
-    glVertex3f(-0.991623, 0.665196, 0.493743)
-    glVertex3f(0.993712, 0.665196, 0.493743)
-    glVertex3f(1.03661, 0.705974, 0.493743)
-    glVertex3f(-1.03452, 0.705974, 0.493743)
-
-    glVertex3f(-1.03452, -0.824061, 0.493743)
-    glVertex3f(-0.991623, -0.773975, 0.493743)
-    glVertex3f(-0.991623, 0.665196, 0.493743)
-    glVertex3f(-1.03452, 0.705974, 0.493743)
-
-    glVertex3f(-1.03452, -0.824061, 0.493743)
-    glVertex3f(1.03661, -0.824061, 0.493743)
-    glVertex3f(0.993712, -0.773975, 0.493743)
-    glVertex3f(-0.991623, -0.773975, 0.493743)
-
-    glVertex3f(0.993712, -0.773975, 0.493743)
-    glVertex3f(1.03661, -0.824061, 0.493743)
-    glVertex3f(1.03661, 0.705974, 0.493743)
-    glVertex3f(0.993712, 0.665196, 0.493743)
-
-    #Monitor Thick Edge
-    glVertex3f(-1.03452, 0.705974, 0.493743)
-    glVertex3f(1.03661, 0.705974, 0.493743)
-    glVertex3f(1.03661, 0.705201, 0.370013)
-    glVertex3f(-1.03452, 0.705201, 0.370013)
-
-    glVertex3f(-1.03279, -0.817768, 0.370013)
-    glVertex3f(-1.03452, -0.824061, 0.493743)
-    glVertex3f(-1.03452, 0.705974, 0.493743)
-    glVertex3f(-1.03279, 0.705201, 0.370013)
-
-    glVertex3f(1.03488, -0.817768, 0.370013)
-    glVertex3f(1.03661, -0.824061, 0.493743)
-    glVertex3f(-1.03452, -0.824061, 0.493743)
-    glVertex3f(-1.03279, -0.817768, 0.370013)
-
-    glVertex3f(1.03661, -0.824061, 0.493743)
-    glVertex3f(1.03488, -0.817768, 0.370013)
-    glVertex3f(1.03488, 0.705201, 0.370013)
-    glVertex3f(1.03661, 0.705974, 0.493743)
-
-    #Monitor Back Big Faces
-    glColor3f(0.5, 0.5, 0.5)
-    glVertex3f(-1.03279, 0.705201, 0.370013)
-    glVertex3f(1.03488, 0.705201, 0.370013)
-    glVertex3f(0.811153, 0.436703, -0.757124)
-    glVertex3f(-0.809064, 0.436703, -0.757124)
-
-    glVertex3f(-0.809064, -0.760436, -0.757124)
-    glVertex3f(-1.03279, -0.817768, 0.370013)
-    glVertex3f(-1.03279, 0.705201, 0.370013)
-    glVertex3f(-0.809064, 0.436703, -0.757124)
-
-    glVertex3f(0.811153, -0.760436, -0.757124)
-    glVertex3f(1.03488, -0.817768, 0.370013)
-    glVertex3f(-1.03279, -0.817768, 0.370013)
-    glVertex3f(-0.809064, -0.760436, -0.757124)
-
-    glVertex3f(1.03488, -0.817768, 0.370013)
-    glVertex3f(0.811153, -0.760436, -0.757124)
-    glVertex3f(0.811153, 0.436703, -0.757124)
-    glVertex3f(1.03488, 0.705201, 0.370013)
-
-    # Back Face
-    glVertex3f(0.811153, -0.760436, -0.757124)
-    glVertex3f(-0.809064, -0.760436, -0.757124)
-    glVertex3f(-0.809064, 0.436703, -0.757124)
-    glVertex3f(0.811153, 0.436703, -0.757124)
-
-    glEnd()
+            if name == swap_material:
+                glDisableClientState(GL_TEXTURE_COORD_ARRAY)
+                glDisable(GL_TEXTURE_2D)
 
 @run_once
 def pygame_init():
@@ -375,6 +276,7 @@ def init():
     gluLookAt(0, 1, 0, 0, 0, 0, 0, 1, 0)
     glClearColor(0.0, 1.0, 0.0, 1.0)
     print("init ran")
+    return
 
 def main():
     roll, pitch, yaw = 0, 0, 0
@@ -382,13 +284,13 @@ def main():
     # Higher alpha means less smoothing
     # We have different classes for each attribute because it saves the prior value to adjust the new one
     # so we need to save them seperately or it wont work
-    alpha = 0.2
-    smoothingRoll = ExponentialMovingAverageRoll(alpha = alpha)
-    smoothingPitch = ExponentialMovingAveragePitch(alpha = alpha)
-    smoothingYaw = ExponentialMovingAverageYaw(alpha = alpha)
-    smoothingX = ExponentialMovingAverageX(alpha = alpha)
-    smoothingY = ExponentialMovingAverageY(alpha = alpha)
-    smoothingZ = ExponentialMovingAverageZ(alpha = alpha)
+    gen_alpha = 0.6
+    smoothingRoll = ExponentialMovingAverageRoll(alpha = gen_alpha)
+    smoothingPitch = ExponentialMovingAveragePitch(alpha = gen_alpha)
+    smoothingYaw = ExponentialMovingAverageYaw(alpha = gen_alpha)
+    smoothingX = ExponentialMovingAverageX(alpha = gen_alpha)
+    smoothingY = ExponentialMovingAverageY(alpha = gen_alpha)
+    smoothingZ = ExponentialMovingAverageZ(alpha = gen_alpha)
     # use internal webcam/ USB camera
     cap = cv2.VideoCapture(args.cam)
 
@@ -544,8 +446,8 @@ def main():
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         # Initialize Image Texture
-        texture_id = load_texture()
-        texture_id = update_texture()
+        load_texture()
+        update_texture()
 
         try:
             if steady_pose.any():
@@ -556,7 +458,7 @@ def main():
                 smoothed_x = smoothingX.update(steady_pose[1][0])
                 smoothed_y = smoothingY.update(steady_pose[1][1])
                 smoothed_z = smoothingZ.update(steady_pose[1][2])
-                apply_object_rotation_translation(smoothed_roll, smoothed_pitch, smoothed_yaw, smoothed_x, smoothed_y, smoothed_z, texture_id)
+                apply_object_rotation_translation(smoothed_roll, smoothed_pitch, smoothed_yaw, smoothed_x, smoothed_y, smoothed_z)
         except:
             none = 0
 
